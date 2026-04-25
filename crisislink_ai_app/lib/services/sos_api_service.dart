@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 
 class SosApiService {
   const SosApiService({
-    this.baseUrl = 'https://mahek2bhatia-crisislink.hf.space',
+    this.baseUrl = 'http://127.0.0.1:8000',
   });
 
   final String baseUrl;
@@ -64,6 +64,11 @@ class SosApiService {
   Future<AssignmentResponse> releaseResponder(String responderId) async {
     final payload = await _post('/api/assign/release/$responderId');
     return AssignmentResponse.fromJson(payload);
+  }
+
+  Future<List<ResponderInfo>> fetchAvailableResponders() async {
+    final payload = await _getList('/api/assign/available-responders');
+    return payload.map(ResponderInfo.fromJson).toList();
   }
 
   Future<Map<String, dynamic>> _get(String path) async {
@@ -400,6 +405,32 @@ class AssignmentResponse {
   final String status;
   final String responderId;
   final String? incidentId;
+}
+
+class ResponderInfo {
+  const ResponderInfo({
+    required this.id,
+    required this.name,
+    required this.type,
+    required this.lat,
+    required this.lng,
+  });
+
+  factory ResponderInfo.fromJson(Map<String, dynamic> json) {
+    return ResponderInfo(
+      id: (json['id'] ?? '').toString(),
+      name: (json['name'] ?? 'Unknown').toString(),
+      type: (json['type'] ?? 'unknown').toString(),
+      lat: _toDouble(json['lat']),
+      lng: _toDouble(json['lng']),
+    );
+  }
+
+  final String id;
+  final String name;
+  final String type;
+  final double lat;
+  final double lng;
 }
 
 class SosApiException implements Exception {

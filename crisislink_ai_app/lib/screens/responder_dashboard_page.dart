@@ -21,7 +21,9 @@ class ResponderDashboardPage extends StatefulWidget {
 class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
   late final TextEditingController _responderIdController;
   List<IncidentSummary> _incidents = const [];
+  List<ResponderInfo> _availableResponders = const [];
   bool _isLoading = true;
+  bool _isLoadingResponders = false;
   String? _error;
   String? _assigningIncidentId;
   bool _isReleasing = false;
@@ -32,7 +34,7 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
     _responderIdController = TextEditingController(
       text: widget.initialResponderId,
     );
-    _loadIncidents();
+    _loadInitialData();
   }
 
   @override
@@ -41,22 +43,29 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
     super.dispose();
   }
 
-  Future<void> _loadIncidents() async {
+  Future<void> _loadInitialData() async {
     setState(() {
       _isLoading = true;
+      _isLoadingResponders = true;
       _error = null;
     });
 
     try {
-      final incidents = await widget.sosApiService.fetchActiveIncidents();
+      final incidentsFuture = widget.sosApiService.fetchActiveIncidents();
+      final respondersFuture = widget.sosApiService.fetchAvailableResponders();
+
+      final incidentsResult = await incidentsFuture;
+      final respondersResult = await respondersFuture;
 
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _incidents = incidents;
+        _incidents = incidentsResult;
+        _availableResponders = respondersResult;
         _isLoading = false;
+        _isLoadingResponders = false;
       });
     } on SosApiException catch (error) {
       if (!mounted) {
@@ -66,6 +75,7 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
       setState(() {
         _error = error.message;
         _isLoading = false;
+        _isLoadingResponders = false;
       });
     } catch (_) {
       if (!mounted) {
@@ -73,8 +83,9 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
       }
 
       setState(() {
-        _error = 'Unable to load active incidents right now.';
+        _error = 'Unable to load data right now.';
         _isLoading = false;
+        _isLoadingResponders = false;
       });
     }
   }
@@ -82,7 +93,7 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
   Future<void> _assignToIncident(IncidentSummary incident) async {
     final responderId = _responderIdController.text.trim();
     if (responderId.isEmpty) {
-      _showSnackBar('Enter a responder ID before assigning yourself.');
+      _showErrorSnackBar('Please select or enter a responder ID');
       return;
     }
 
@@ -91,7 +102,7 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
     });
 
     try {
-      final result = await widget.sosApiService.assignResponder(
+      await widget.sosApiService.assignResponder(
         responderId: responderId,
         incidentId: incident.id,
       );
@@ -100,10 +111,10 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
         return;
       }
 
-      _showSnackBar(
-        'Responder ${result.responderId} assigned to incident ${incident.id.substring(0, 8)}.',
+      _showSuccessSnackBar(
+        'Responder assigned to incident ${incident.id.substring(0, 8)}',
       );
-      await _loadIncidents();
+      await _loadInitialData();
     } on SosApiException catch (error) {
       if (!mounted) {
         return;
@@ -112,8 +123,8 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
       setState(() {
         _assigningIncidentId = null;
       });
-      _showSnackBar(error.message);
-    } catch (_) {
+      _showErrorSnackBar(_extractErrorMessage(error.message));
+    } catch (e) {
       if (!mounted) {
         return;
       }
@@ -121,14 +132,14 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
       setState(() {
         _assigningIncidentId = null;
       });
-      _showSnackBar('Unable to assign this responder right now.');
+      _showErrorSnackBar('Unable to assign responder: ${e.toString()}');
     }
   }
 
   Future<void> _releaseResponder() async {
     final responderId = _responderIdController.text.trim();
     if (responderId.isEmpty) {
-      _showSnackBar('Enter a responder ID before releasing the unit.');
+      _showErrorSnackBar('Please select or enter a responder ID');
       return;
     }
 
@@ -137,14 +148,14 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
     });
 
     try {
-      final result = await widget.sosApiService.releaseResponder(responderId);
+      await widget.sosApiService.releaseResponder(responderId);
 
       if (!mounted) {
         return;
       }
 
-      _showSnackBar('Responder ${result.responderId} is now available again.');
-      await _loadIncidents();
+      _showSuccessSnackBar('Responder is now available');
+      await _loadInitialData();
     } on SosApiException catch (error) {
       if (!mounted) {
         return;
@@ -153,8 +164,8 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
       setState(() {
         _isReleasing = false;
       });
-      _showSnackBar(error.message);
-    } catch (_) {
+      _showErrorSnackBar(_extractErrorMessage(error.message));
+    } catch (e) {
       if (!mounted) {
         return;
       }
@@ -162,7 +173,148 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
       setState(() {
         _isReleasing = false;
       });
-      _showSnackBar('Unable to release this responder right now.');
+      _showErrorSnackBar('Unable to release responder: ${e.toString()}');
+    }
+  }
+
+  String _extractErrorMessage(String message) {
+    // Extract user-friendly message from API error
+    if (message.contains('Invalid UUID format')) {
+      return 'Invalid responder ID format. Please use a valid UUID.';
+    }
+    if (message.contains('Responder not found')) {
+      return 'Responder ID not found in the system.';
+    }
+    if (message.contains('already busy') || message.contains('offline')) {
+      return 'Responder is not available for assignment.';
+    }
+    return message;
+  }
+
+  Future<void> _showResponderPicker() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: const Color(0xFF0C1016),
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        builder: (context, scrollController) => Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF121821),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            border: Border(
+              top: BorderSide(
+                color: Colors.white.withValues(alpha: 0.08),
+              ),
+            ),
+          ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    const Text(
+                      'Select Responder',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: _isLoadingResponders
+                    ? const Center(
+                        child: CircularProgressIndicator(
+                          color: AppTheme.accentRed,
+                        ),
+                      )
+                    : _availableResponders.isEmpty
+                        ? const Center(
+                            child: Text(
+                              'No responders available',
+                              style: TextStyle(color: AppTheme.textMuted),
+                            ),
+                          )
+                        : ListView.builder(
+                            controller: scrollController,
+                            itemCount: _availableResponders.length,
+                            itemBuilder: (context, index) {
+                              final responder = _availableResponders[index];
+                              final isSelected = _responderIdController.text ==
+                                  responder.id;
+
+                              return Container(
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? const Color(0xFF2F6BFF).withValues(
+                                          alpha: 0.2,
+                                        )
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: isSelected
+                                        ? const Color(0xFF2F6BFF)
+                                        : Colors.white.withValues(alpha: 0.08),
+                                  ),
+                                ),
+                                child: ListTile(
+                                  onTap: () {
+                                    _responderIdController.text = responder.id;
+                                    Navigator.pop(context);
+                                  },
+                                  leading: Icon(
+                                    _getResponderIcon(responder.type),
+                                    color: const Color(0xFF2F6BFF),
+                                  ),
+                                  title: Text(responder.name),
+                                  subtitle: Text(
+                                    responder.type,
+                                    style: const TextStyle(
+                                      color: AppTheme.textMuted,
+                                    ),
+                                  ),
+                                  trailing: isSelected
+                                      ? const Icon(
+                                          Icons.check_circle,
+                                          color: Color(0xFF2F6BFF),
+                                        )
+                                      : null,
+                                ),
+                              );
+                            },
+                          ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _getResponderIcon(String type) {
+    switch (type.toLowerCase()) {
+      case 'medical':
+      case 'med':
+        return Icons.local_hospital;
+      case 'fire':
+        return Icons.local_fire_department;
+      case 'police':
+        return Icons.security;
+      default:
+        return Icons.person;
     }
   }
 
@@ -182,10 +334,38 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
     );
   }
 
-  void _showSnackBar(String message) {
+  void _showSuccessSnackBar(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+      ..showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.white),
+              const SizedBox(width: 12),
+              Expanded(child: Text(message)),
+            ],
+          ),
+          backgroundColor: Colors.green.shade700,
+        ),
+      );
+  }
+
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.error_outline, color: Colors.white),
+              const SizedBox(width: 12),
+              Expanded(child: Text(message)),
+            ],
+          ),
+          backgroundColor: AppTheme.accentRed,
+        ),
+      );
   }
 
   @override
@@ -202,7 +382,7 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
         child: SafeArea(
           child: RefreshIndicator(
             color: AppTheme.accentRed,
-            onRefresh: _loadIncidents,
+            onRefresh: _loadInitialData,
             child: ListView(
               padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
               children: [
@@ -218,7 +398,7 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
                     ),
                     const Spacer(),
                     IconButton(
-                      onPressed: _loadIncidents,
+                      onPressed: _loadInitialData,
                       icon: const Icon(Icons.refresh_rounded),
                       tooltip: 'Refresh',
                     ),
@@ -259,12 +439,36 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
                         ),
                       ),
                       const SizedBox(height: 10),
-                      TextField(
-                        controller: _responderIdController,
-                        decoration: const InputDecoration(
-                          hintText: 'Enter live responder ID',
-                          prefixIcon: Icon(Icons.badge_outlined),
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _responderIdController,
+                              decoration: InputDecoration(
+                                hintText: 'Select or enter responder ID',
+                                prefixIcon: const Icon(Icons.badge_outlined),
+                                suffixIcon: _responderIdController.text.isNotEmpty
+                                    ? IconButton(
+                                        icon: const Icon(Icons.clear),
+                                        onPressed: () {
+                                          _responderIdController.clear();
+                                          setState(() {});
+                                        },
+                                      )
+                                    : null,
+                              ),
+                              onChanged: (value) => setState(() {}),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton.filled(
+                            onPressed: _isLoadingResponders
+                                ? null
+                                : _showResponderPicker,
+                            tooltip: 'Select from available responders',
+                            icon: const Icon(Icons.list),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 12),
                       SizedBox(
@@ -286,6 +490,72 @@ class _ResponderDashboardPageState extends State<ResponderDashboardPage> {
                         ),
                       ),
                     ],
+                  ),
+                ),
+              if (_availableResponders.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 16),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1F2937).withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.info_outline,
+                          size: 18,
+                          color: AppTheme.textMuted,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${_availableResponders.length} responders available',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.textMuted,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.only(top: 16),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.accentRed.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppTheme.accentRed.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.warning_rounded,
+                          size: 18,
+                          color: AppTheme.accentRed,
+                        ),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'No responders available',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFFFF7675),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 22),
