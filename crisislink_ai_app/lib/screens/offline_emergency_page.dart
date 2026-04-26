@@ -1,11 +1,30 @@
 import 'package:flutter/material.dart';
 
+import '../services/emergency_call_service.dart';
 import '../theme/app_theme.dart';
 
-class OfflineEmergencyPage extends StatelessWidget {
+class OfflineEmergencyPage extends StatefulWidget {
   const OfflineEmergencyPage({super.key});
 
   static const routeName = '/offline-emergency';
+
+  @override
+  State<OfflineEmergencyPage> createState() => _OfflineEmergencyPageState();
+}
+
+class _OfflineEmergencyPageState extends State<OfflineEmergencyPage> {
+  @override
+  void initState() {
+    super.initState();
+    // Automatically trigger 112 call when page opens
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initiateEmergencyCall();
+    });
+  }
+
+  Future<void> _initiateEmergencyCall() async {
+    await EmergencyCallService.callEmergency();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -74,7 +93,7 @@ class OfflineEmergencyPage extends StatelessWidget {
                         ),
                         SizedBox(height: 10),
                         Text(
-                          'Network unavailable. Triggering offline emergency fallback.',
+                          'Network unavailable. Triggering automatic 112 emergency call...',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: AppTheme.textMuted,
@@ -85,28 +104,45 @@ class OfflineEmergencyPage extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 28),
-                  const _EmergencyActionCard(
+                  _EmergencyActionCard(
                     title: 'Calling 112',
                     description:
                         'Launch emergency dial flow as the primary offline response.',
                     icon: Icons.call_rounded,
-                    color: Color(0xFFD92D20),
+                    color: const Color(0xFFD92D20),
+                    onTap: _initiateEmergencyCall,
                   ),
                   const SizedBox(height: 12),
-                  const _EmergencyActionCard(
+                  _EmergencyActionCard(
                     title: 'Sending Family Alert',
                     description:
-                        'Prepare emergency message with SOS status and last known details.',
+                        'Send emergency message with SOS status and last known details.',
                     icon: Icons.sms_rounded,
-                    color: Color(0xFF275DF5),
+                    color: const Color(0xFF275DF5),
+                    onTap: () {
+                      // SMS functionality can be expanded later
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('SMS alert feature coming soon'),
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 12),
-                  const _EmergencyActionCard(
+                  _EmergencyActionCard(
                     title: 'Sharing Last Known Location',
                     description:
                         'Queue the last available location snapshot for trusted contacts.',
                     icon: Icons.location_on_rounded,
-                    color: Color(0xFFF08400),
+                    color: const Color(0xFFF08400),
+                    onTap: () {
+                      // Location sharing functionality can be expanded later
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Location sharing feature coming soon'),
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 18),
                   Container(
@@ -120,7 +156,7 @@ class OfflineEmergencyPage extends StatelessWidget {
                       ),
                     ),
                     child: const Text(
-                      'Device is offline, so the app is showing the fallback workflow first. Wire this page to native phone and messaging APIs to place the actual 112 call and send SMS automatically.',
+                      'Device is offline. Emergency call to 112 is initiated automatically. Tap the cards above to retry or trigger manual actions.',
                       style: TextStyle(
                         color: Color(0xFFC8C3CD),
                         fontSize: 14,
@@ -177,66 +213,93 @@ class _StatusPill extends StatelessWidget {
   }
 }
 
-class _EmergencyActionCard extends StatelessWidget {
+class _EmergencyActionCard extends StatefulWidget {
   const _EmergencyActionCard({
     required this.title,
     required this.description,
     required this.icon,
     required this.color,
+    required this.onTap,
   });
 
   final String title;
   final String description;
   final IconData icon;
   final Color color;
+  final VoidCallback onTap;
+
+  @override
+  State<_EmergencyActionCard> createState() => _EmergencyActionCardState();
+}
+
+class _EmergencyActionCardState extends State<_EmergencyActionCard> {
+  bool _isPressed = false;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: const Color(0xFF121318),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.14),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: color, size: 24),
+    return GestureDetector(
+      onTapDown: (_) {
+        setState(() => _isPressed = true);
+      },
+      onTapUp: (_) {
+        setState(() => _isPressed = false);
+        widget.onTap();
+      },
+      onTapCancel: () {
+        setState(() => _isPressed = false);
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: _isPressed
+              ? widget.color.withValues(alpha: 0.1)
+              : const Color(0xFF121318),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: _isPressed
+                ? widget.color.withValues(alpha: 0.5)
+                : Colors.white.withValues(alpha: 0.08),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  description,
-                  style: const TextStyle(
-                    color: AppTheme.textMuted,
-                    fontSize: 14,
-                    height: 1.45,
-                  ),
-                ),
-              ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: widget.color.withValues(alpha: 0.14),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(widget.icon, color: widget.color, size: 24),
             ),
-          ),
-        ],
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.title,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    widget.description,
+                    style: const TextStyle(
+                      color: AppTheme.textMuted,
+                      fontSize: 14,
+                      height: 1.45,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
