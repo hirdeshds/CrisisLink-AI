@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 
 class SosApiService {
   const SosApiService({
-    this.baseUrl = 'http://127.0.0.1:8000',
+    this.baseUrl = 'https://mahek2bhatia-crisislink.hf.space',
   });
 
   final String baseUrl;
